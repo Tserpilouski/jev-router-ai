@@ -1,0 +1,20 @@
+{
+  "name": "jev-router-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An ultra-lightweight, token-saving workspace action router and decision layer for LLM agents",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "check:gemini": "node packages/router/dist/test-gemini.js",
+    "dev": "concurrently -n \"cli,dash\" -c \"cyan,magenta\" \"node packages/cli/dist/index.js\" \"npm run dev -w @jev-router-ai/dashboard\"",
+    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
