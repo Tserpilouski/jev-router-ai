@@ -36,23 +36,35 @@ flowchart TD
 
     subgraph Local Workspace Tools [0 API Tokens]
         Dispatch -- "Search Code" --> ToolGrep[grep_code\nSearch patterns/symbols]
+        Dispatch -- "Directory Hierarchy" --> ToolTree[check_tree\nInspect nested folders]
+        Dispatch -- "Find File Paths" --> ToolFind[find_files\nFast glob matcher]
+        Dispatch -- "Outline Symbols" --> ToolOutline[outline_file\nAST declarations outline]
         Dispatch -- "Read Slice" --> ToolContext[check_context\nRead files/lines]
         Dispatch -- "Modify File" --> ToolEdit[edit_file\nSurgical code replacement]
         Dispatch -- "New File" --> ToolCreate[create_file\nWrite new files]
+        Dispatch -- "Verify Code" --> ToolVerify[run_check / run_tests\nLocal linter & tests]
+        Dispatch -- "Revert" --> ToolRollback[rollback_edit\nUndo failed modification]
     end
 
     Dispatch -- "Complex Reasoning / Stuck" --> RouteFrontier[Frontier LLM Route\nDeep code synthesis]
 
     ToolGrep -- "0 matches / ambiguous" --> Redirect[Adaptive Self-Redirection Engine]
+    ToolTree -- "Narrow down target" --> Redirect
     ToolEdit -- "Target mismatch / error" --> Redirect
+    ToolVerify -- "Syntax or test failure" --> Redirect
     ToolContext -- "Needs modification" --> Redirect
     
     Redirect -.->|Re-evaluates with feedback| RouterCore
 
     ToolGrep --> Success[Response / Action Complete]
+    ToolTree --> Success
+    ToolFind --> Success
+    ToolOutline --> Success
     ToolEdit --> Success
     ToolCreate --> Success
     ToolContext --> Success
+    ToolVerify --> Success
+    ToolRollback --> Success
     RouteFrontier --> Success
 
     RouterCore -.->|Live Telemetry & Thoughts| WSServer[WebSocket Telemetry Server]
@@ -64,26 +76,54 @@ flowchart TD
 
 ## 🛠️ Local Action Toolset
 
-The local router controls a focused suite of deterministic workspace tools:
+The local router controls a comprehensive suite of deterministic workspace tools, grouped by operational phase:
 
+### 1. Discovery & Search (0 API Tokens)
 | Action Tool | Description | Why It Saves Tokens |
 | :--- | :--- | :--- |
 | `grep_code` | Searches codebase files for regex patterns, functions, or variable names. | Avoids passing entire project directories or file lists to a frontier model. |
+| `check_tree` | Recursively inspects directory hierarchies with configurable depth limits (`maxDepth`). | Allows the small model to locate specific files in nested folders without dumping full repos into prompt context. |
+| `find_files` | Matches files using fast glob patterns (e.g., `*.config.ts`, `**/auth/**`). | Finds configuration or target files instantly in milliseconds. |
+
+### 2. Context Inspection (0 API Tokens)
+| Action Tool | Description | Why It Saves Tokens |
+| :--- | :--- | :--- |
+| `outline_file` | Extracts top-level declarations (classes, functions, interfaces, types) from a file without reading bodies. | Condenses a 1,000-line file into a 25-line outline, saving ~95% of prompt tokens before reading lines. |
 | `check_context` | Reads targeted line ranges or specific file slices. | Only reads the exact lines needed, preventing context-window bloat. |
-| `edit_file` | Applies surgical text or block replacements in existing files. | Performs mechanical code updates locally without full-file generation costs. |
+
+### 3. Modification & Authoring (0 API Tokens)
+| Action Tool | Description | Why It Saves Tokens |
+| :--- | :--- | :--- |
+| `edit_file` | Applies surgical text or block replacements in existing files. | Performs mechanical code updates locally without full-file regeneration costs. |
 | `create_file` | Generates a new file with specified initial content. | Creates boilerplate, configurations, or new modules directly. |
-| `escalate` | Dispatches task to frontier LLM (e.g. Claude / GPT). | Reserved for multi-file architectural refactors or complex algorithmic generation. |
+
+### 4. Verification & Safety (0 API Tokens)
+| Action Tool | Description | Why It Saves Tokens |
+| :--- | :--- | :--- |
+| `run_check` | Runs local linter or TypeScript typechecker (`tsc --noEmit`, `eslint`). | Catches syntax and type errors locally without asking a frontier LLM to review. |
+| `run_tests` | Executes targeted unit tests related to edited files. | Verifies business logic correctness with immediate assertion feedback. |
+| `git_diff_summary` | Inspects staged or unstaged modifications (`git diff --stat`). | Verifies changes before final completion. |
+| `rollback_edit` | Reverts the last surgical file modification to a clean checkpoint. | Automatically undoes corrupted or repeated edit attempts before escalating. |
+
+### 5. Escalation
+| Action Tool | Description | Why It Saves Tokens |
+| :--- | :--- | :--- |
+| `escalate` | Dispatches task to frontier LLM (e.g. Claude / GPT). | Reserved exclusively for multi-file architectural refactors or complex algorithmic generation. |
+
+---
 
 ### How Self-Redirection Works in Practice
 1. **User Prompt:** *"Find where the user authentication token is verified and add expiration checking."*
-2. **Step 1 (Grep):** Small LLM decides: `grep_code { pattern: "verifyToken" }`.
-3. **Execution & Feedback:** Tool returns `0 matches found`.
-4. **Self-Redirection:** Instead of failing, the router intercepts the empty output. The small LLM re-evaluates:
-   * *Rationale:* *"Direct pattern verifyToken yielded 0 matches. Let's inspect auth middleware files."*
-   * *Action:* `grep_code { pattern: "auth" }` or `check_context { path: "src/middleware/auth.ts" }`.
-5. **Step 2 (Context Inspection):** Router reads lines 10–40 of `src/middleware/auth.ts`.
-6. **Step 3 (Edit):** Router dispatches `edit_file` to add the expiration check.
-7. **Total Tokens Burned on Frontier LLM:** **0 tokens** (all handled locally via the router and local tools).
+2. **Step 1 (Tree Check / Search):** Small LLM decides: `check_tree { path: "src", maxDepth: 2 }` or `find_files { glob: "**/auth*" }`.
+3. **Execution & Feedback:** Identifies `src/services/auth.service.ts`.
+4. **Step 2 (Outline File):** Small LLM decides: `outline_file { path: "src/services/auth.service.ts" }`.
+   * *Output:* Finds `verifyToken(token: string)` starts at line 48.
+5. **Step 3 (Context Inspection):** Router reads lines 45–70 with `check_context`.
+6. **Step 4 (Edit):** Router dispatches `edit_file` to add the expiration check.
+7. **Step 5 (Verification):** Router runs `run_check { path: "src/services/auth.service.ts" }`.
+   * If a syntax typo occurred, the router **redirects itself** using the compiler error to fix line 52.
+   * If clean, verification succeeds!
+8. **Total Tokens Burned on Frontier LLM:** **0 tokens** (entire lifecycle handled locally).
 
 ---
 
@@ -91,53 +131,44 @@ The local router controls a focused suite of deterministic workspace tools:
 
 The embedded HTTP server and WebSocket broadcaster stream live analytics to a React dashboard:
 
-* **Live Decision Pipeline:** Step-by-step interactive timeline showing prompt ingress, local LLM rationale, tool dispatch (`grep`, `context`, `edit`), tool output, and redirection cycles.
+* **Live Decision Pipeline:** Step-by-step interactive timeline showing prompt ingress, local LLM rationale, tool dispatch (`check_tree`, `outline_file`, `edit_file`, `run_check`), tool output, and redirection cycles.
 * **Token Savings Scoreboard:** Real-time calculator comparing local execution (0 API tokens) against what a frontier model would have consumed for the same prompt context and tool loops.
-* **Action Distribution Chart:** Pie/bar visualizer tracking frequencies of `grep_code`, `check_context`, `edit_file`, `create_file`, and `escalate`.
+* **Action Distribution Chart:** Pie/bar visualizer tracking frequencies across discovery, context, editing, verification, and escalation.
 * **Latency Telemetry:** Execution speed broken down by router decision time vs. tool execution time.
 
 ---
 
-## 📁 Repository Structure
+## 🌲 `tree` Tool: Intelligent File Discovery & Navigation
 
-The project is structured as a strict npm workspaces monorepo:
+Instead of dumping an entire repository's file tree (which consumes 10,000+ tokens on frontier models), `jev-router-ai` equips the local decision model with an intelligent `tree` tool (`check_tree`) with configurable depth constraints (`maxDepth`).
 
+The router uses `tree` to inspect directory hierarchies progressively, narrow down ambiguous paths, and pinpoint the exact files needed for the task.
+
+```mermaid
+flowchart TD
+    Prompt[User Prompt: 'Find where auth middleware is and how it validates tokens'] --> Router[Router: smollm2:135m / Jev]
+    
+    subgraph Tree Discovery & Search Pipeline [0 API Tokens]
+        Router -->|Step 1: Inspect Root Hierarchy| CallTree["tree(path: '.', maxDepth: 2)"]
+        CallTree --> FS[(Local Workspace Filesystem)]
+        FS -->|Directory Tree Output| TreeOutput[Bounded Directory Tree]
+        
+        TreeOutput --> Evaluate{Evaluate Target File}
+        
+        Evaluate -- "Candidate found in subfolder" --> TargetFound["Target: src/middleware/auth.ts"]
+        TargetFound --> ActionInspect["check_context(path: 'src/middleware/auth.ts', lines: 1-50)"]
+        
+        Evaluate -- "Deeply nested or ambiguous" --> RedirectTree["Self-Redirect: tree(path: 'src/services', maxDepth: 1)"]
+        RedirectTree --> FS
+    end
+
+    ActionInspect --> Done[Task Resolved / Next Action Selected]
 ```
-jev-router-ai/
-├── packages/
-│   ├── router/          # Core routing engine & local workspace tools
-│   │   ├── src/
-│   │   │   ├── engine.ts         # Ollama client (smollm2:135m) & prompt templates
-│   │   │   ├── parser.ts         # Hybrid JSON & regex fallback parser
-│   │   │   ├── tools/            # Local workspace tools:
-│   │   │   │   ├── grep.ts       # Codebase regex & pattern search
-│   │   │   │   ├── context.ts    # File slice reader & line inspector
-│   │   │   │   ├── edit.ts       # Surgical file content replacer
-│   │   │   │   └── create.ts     # New file creator
-│   │   │   ├── redirector.ts     # Self-redirection state machine & feedback loop
-│   │   │   └── types.ts          # Tool interfaces, events, and action payloads
-│   │   └── package.json
-│   │
-│   ├── cli/             # Interactive terminal REPL & WebSocket telemetry server
-│   │   ├── src/
-│   │   │   ├── index.ts          # CLI REPL entry point
-│   │   │   ├── server.ts         # HTTP & WebSocket server for dashboard
-│   │   │   └── terminal.ts       # Live terminal thought & action formatter
-│   │   └── package.json
-│   │
-│   └── dashboard/       # Real-time React frontend (Vite + WebSockets)
-│       ├── src/
-│       │   ├── App.tsx           # Dashboard root
-│       │   ├── components/       # Decision trace, token savings counter, tool charts
-│       │   └── hooks/            # WebSocket subscription hook
-│       ├── index.html
-│       ├── vite.config.ts
-│       └── package.json
-│
-├── package.json         # Monorepo root with npm workspaces configuration
-├── tsconfig.json        # Base TypeScript compiler configuration
-└── README.md
-```
+
+### Why the `tree` Tool Saves Massive Tokens:
+* **Bounded Depth (`maxDepth`):** A small model inspects 1–2 levels deep at a time (~80 tokens) instead of swallowing the full recursive tree (~15,000 tokens).
+* **Targeted Directory Zooming:** If the root tree reveals `src/` and `lib/`, the router self-redirects into `tree(path: 'src', maxDepth: 2)` to zero in on the exact file.
+* **Seamless Chain into Context:** Once `tree` locates `auth.ts`, the router immediately transitions to `outline_file` or `check_context` without involving a frontier LLM.
 
 ---
 
