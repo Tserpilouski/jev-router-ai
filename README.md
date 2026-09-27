@@ -20,56 +20,25 @@ The router decides when to **grep code**, **inspect file context**, **edit files
 
 ---
 
-## 🏗️ Architecture & Decision Flow
+## 🏗️ Architecture Overview
 
 ```mermaid
 flowchart TD
     User([User Prompt]) --> CLI[Interactive CLI REPL]
-    CLI --> RouterCore[Router Decision Engine]
-    
-    subgraph Router Core [packages/router]
-        RouterCore --> PromptEng[Format Intent & Tool Schemas]
-        PromptEng --> Ollama[Local Ollama: smollm2:135m]
-        Ollama --> Parser[Hybrid JSON & Regex Fallback Parser]
-        Parser --> Dispatch{Action Selection}
-    end
+    CLI --> Router["Router Engine (smollm2:135m / Jev)"]
 
-    subgraph Local Workspace Tools [0 API Tokens]
-        Dispatch -- "Search Code" --> ToolGrep[grep_code\nSearch patterns/symbols]
-        Dispatch -- "Directory Hierarchy" --> ToolTree[check_tree\nInspect nested folders]
-        Dispatch -- "Find File Paths" --> ToolFind[find_files\nFast glob matcher]
-        Dispatch -- "Outline Symbols" --> ToolOutline[outline_file\nAST declarations outline]
-        Dispatch -- "Read Slice" --> ToolContext[check_context\nRead files/lines]
-        Dispatch -- "Modify File" --> ToolEdit[edit_file\nSurgical code replacement]
-        Dispatch -- "New File" --> ToolCreate[create_file\nWrite new files]
-        Dispatch -- "Verify Code" --> ToolVerify[run_check / run_tests\nLocal linter & tests]
-        Dispatch -- "Revert" --> ToolRollback[rollback_edit\nUndo failed modification]
-    end
+    Router --> RouteLocal["Local Workspace Tools (0 API Tokens)\nDiscovery • Context • Edit • Verify"]
+    Router --> RouteFrontier["Frontier LLM Escalation\nDeep multi-file reasoning"]
 
-    Dispatch -- "Complex Reasoning / Stuck" --> RouteFrontier[Frontier LLM Route\nDeep code synthesis]
+    RouteLocal -.->|Error / Low Confidence| Redirect[Adaptive Self-Redirection]
+    Redirect -.->|Re-evaluate with feedback| Router
 
-    ToolGrep -- "0 matches / ambiguous" --> Redirect[Adaptive Self-Redirection Engine]
-    ToolTree -- "Narrow down target" --> Redirect
-    ToolEdit -- "Target mismatch / error" --> Redirect
-    ToolVerify -- "Syntax or test failure" --> Redirect
-    ToolContext -- "Needs modification" --> Redirect
-    
-    Redirect -.->|Re-evaluates with feedback| RouterCore
+    RouteLocal --> Result([Task Complete / Output])
+    RouteFrontier --> Result
 
-    ToolGrep --> Success[Response / Action Complete]
-    ToolTree --> Success
-    ToolFind --> Success
-    ToolOutline --> Success
-    ToolEdit --> Success
-    ToolCreate --> Success
-    ToolContext --> Success
-    ToolVerify --> Success
-    ToolRollback --> Success
-    RouteFrontier --> Success
-
-    RouterCore -.->|Live Telemetry & Thoughts| WSServer[WebSocket Telemetry Server]
-    WSServer -.->|Stream Events| WebDashboard[React Web Dashboard\nlocalhost:3000]
-    Success --> CLI
+    Router -.->|Telemetry Stream| WS[WebSocket Telemetry Server]
+    WS -.-> Dashboard[Real-Time React Dashboard]
+    Result --> CLI
 ```
 
 ---
@@ -113,6 +82,19 @@ The local router controls a comprehensive suite of deterministic workspace tools
 ---
 
 ### How Self-Redirection Works in Practice
+
+```mermaid
+flowchart TD
+    Action[Action Dispatched] --> Exec[Execute Tool Locally]
+    Exec --> ResultCheck{Action Succeeded?}
+    
+    ResultCheck -- "Success" --> Next[Next Step / Complete]
+    ResultCheck -- "0 Matches / Syntax Error / Target Mismatch" --> Intercept[Intercept Output & Build Feedback]
+    
+    Intercept --> ReRoute["Self-Redirect: Re-evaluate Next Best Action"]
+    ReRoute --> Action
+```
+
 1. **User Prompt:** *"Find where the user authentication token is verified and add expiration checking."*
 2. **Step 1 (Tree Check / Search):** Small LLM decides: `check_tree { path: "src", maxDepth: 2 }` or `find_files { glob: "**/auth*" }`.
 3. **Execution & Feedback:** Identifies `src/services/auth.service.ts`.
@@ -130,6 +112,15 @@ The local router controls a comprehensive suite of deterministic workspace tools
 ## 📊 Real-Time React Dashboard
 
 The embedded HTTP server and WebSocket broadcaster stream live analytics to a React dashboard:
+
+```mermaid
+flowchart LR
+    Router[Router Engine] -->|Real-time Events| WS[WebSocket Telemetry Hub]
+    WS --> View1[Live Decision Timeline]
+    WS --> View2[Tokens Saved Counter]
+    WS --> View3[Tool Distribution Charts]
+    WS --> View4[Decision Latency Telemetry]
+```
 
 * **Live Decision Pipeline:** Step-by-step interactive timeline showing prompt ingress, local LLM rationale, tool dispatch (`check_tree`, `outline_file`, `edit_file`, `run_check`), tool output, and redirection cycles.
 * **Token Savings Scoreboard:** Real-time calculator comparing local execution (0 API tokens) against what a frontier model would have consumed for the same prompt context and tool loops.
