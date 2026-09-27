@@ -1,19 +1,22 @@
 # jev-router-ai
 
-> **An ultra-lightweight, token-saving decision layer and adaptive self-redirecting router for LLMs.**
+> **An ultra-lightweight, token-saving workspace action router and decision layer for LLM agents.**
 
-`jev-router-ai` is an intelligent decision router designed to slash LLM inference costs and latency. Instead of blindly sending every user request to expensive, slow frontier models, `jev-router-ai` acts as a fast decision gateway. It evaluates incoming prompts using a lightweight local model, selects the most efficient execution path, autonomously redirects itself if an action fails or needs escalation, and broadcasts its real-time "thinking process" and metrics to both an interactive CLI and a live React dashboard.
+`jev-router-ai` is an autonomous decision router engineered to drastically slash LLM token consumption and latency during codebase operations. Instead of piping massive file trees, grep outputs, and routine workspace edits into expensive, slow frontier models, `jev-router-ai` deploys an ultra-fast local decision model (Ollama `smollm2:135m` in development, TypeSafe AI's **Jev** in production) to analyze user intent and choose the exact local action to take.
+
+The router decides when to **grep code**, **inspect file context**, **edit files**, **create files**, or **escalate to a frontier model**, autonomously redirecting its own actions if a search or edit fails—all while streaming its internal thought process live to an interactive CLI and a real-time React dashboard.
 
 ---
 
 ## 🚀 Key Highlights
 
-* **Token & Cost Optimization:** Routes simple queries to deterministic local tools (0 extra tokens) or small models, reserving high-cost frontier models only when necessary.
-* **Adaptive Self-Redirection:** If a chosen action or tool encounters an error or returns low confidence, the router catches the output and autonomously redirects itself to an escalation route or fallback model without requiring user intervention.
-* **Transparent Reasoning Stream:** Streams the router's internal rationale, confidence scores, and action dispatches in real-time to both terminal and web interfaces.
-* **Dual Interface (CLI + Live Web Dashboard):** Run queries through an interactive terminal REPL while simultaneously monitoring live decision trees, latency, and tokens saved on a real-time React web application over WebSockets.
-* **Resilient Parsing for Micro-LLMs:** Uses a hybrid JSON extraction engine with regex fallback, enabling reliable structured decisions even on ultra-compact models like `smollm2:135m`.
-* **Clean Monorepo Architecture:** Built with strict npm workspaces separating the core router, CLI runner, and web dashboard.
+* **Local Workspace Decision Engine:** A tiny local model (`smollm2:135m` or Jev) decides whether to `grep`, inspect context, edit, or create files—eliminating thousands of frontier tokens wasted on basic workspace discovery.
+* **Massive Token & Cost Savings:** Routine exploration and surgical file modifications run entirely locally at **0 API token cost**, reserving heavy frontier LLMs exclusively for complex multi-file reasoning.
+* **Autonomous Action Self-Redirection:** If a `grep` yields no matches, or an `edit_file` target string fails to match, the router catches the result, self-redirects, and selects a corrective follow-up action (e.g., broader search, context re-inspection, or model escalation) without stalling or bothering the user.
+* **Real-Time Reasoning Stream:** Streams the router's internal rationale, chosen actions, tool parameters, and redirection loops live to both terminal logs and a real-time web UI over WebSockets.
+* **Dual Interface (CLI + Live React Dashboard):** Execute prompts interactively in the terminal while observing real-time decision trees, cumulative tokens saved, and routing latencies on `localhost:3000`.
+* **Resilient Parsing for Micro-LLMs:** Employs a hybrid JSON schema parser with regex fallback so even ultra-compact 135M models reliably output structured tool calls.
+* **Strict npm Workspaces Monorepo:** Clean architectural separation across `packages/router`, `packages/cli`, and `packages/dashboard`.
 
 ---
 
@@ -22,60 +25,76 @@
 ```mermaid
 flowchart TD
     User([User Prompt]) --> CLI[Interactive CLI REPL]
-    CLI --> RouterCore[Router Engine]
+    CLI --> RouterCore[Router Decision Engine]
     
     subgraph Router Core [packages/router]
-        RouterCore --> PromptEng[Format Prompt with Schema]
+        RouterCore --> PromptEng[Format Intent & Tool Schemas]
         PromptEng --> Ollama[Local Ollama: smollm2:135m]
-        Ollama --> Parser[Hybrid JSON & Regex Parser]
-        Parser --> Decision{Evaluate Decision}
+        Ollama --> Parser[Hybrid JSON & Regex Fallback Parser]
+        Parser --> Dispatch{Action Selection}
     end
 
-    Decision -- "Direct Action" --> RouteTool[Route 1: Deterministic Tool / Code\n0 Extra LLM Tokens]
-    Decision -- "Simple QA" --> RouteLocal[Route 2: Local Lightweight LLM\nFast & Free]
-    Decision -- "Complex Task" --> RouteFrontier[Route 3: Escalation / Frontier LLM]
+    subgraph Local Workspace Tools [0 API Tokens]
+        Dispatch -- "Search Code" --> ToolGrep[grep_code\nSearch patterns/symbols]
+        Dispatch -- "Read Slice" --> ToolContext[check_context\nRead files/lines]
+        Dispatch -- "Modify File" --> ToolEdit[edit_file\nSurgical code replacement]
+        Dispatch -- "New File" --> ToolCreate[create_file\nWrite new files]
+    end
 
-    RouteTool -- "Execution Fails or Low Confidence" --> SelfRedirect[Adaptive Self-Redirection]
-    SelfRedirect --> RouterCore
+    Dispatch -- "Complex Reasoning / Stuck" --> RouteFrontier[Frontier LLM Route\nDeep code synthesis]
 
-    RouteTool --> Result[Final Response]
-    RouteLocal --> Result
-    RouteFrontier --> Result
+    ToolGrep -- "0 matches / ambiguous" --> Redirect[Adaptive Self-Redirection Engine]
+    ToolEdit -- "Target mismatch / error" --> Redirect
+    ToolContext -- "Needs modification" --> Redirect
+    
+    Redirect -.->|Re-evaluates with feedback| RouterCore
 
-    RouterCore -.->|Stream Thoughts & Events| WSServer[WebSocket Telemetry Server]
-    WSServer -.->|Real-time Metrics| WebDashboard[React Web Dashboard\nlocalhost:3000]
-    Result --> CLI
+    ToolGrep --> Success[Response / Action Complete]
+    ToolEdit --> Success
+    ToolCreate --> Success
+    ToolContext --> Success
+    RouteFrontier --> Success
+
+    RouterCore -.->|Live Telemetry & Thoughts| WSServer[WebSocket Telemetry Server]
+    WSServer -.->|Stream Events| WebDashboard[React Web Dashboard\nlocalhost:3000]
+    Success --> CLI
 ```
 
 ---
 
-## ⚡ Tri-Route Execution Model
+## 🛠️ Local Action Toolset
 
-Out of the box, `jev-router-ai` comes configured with a tri-route strategy:
+The local router controls a focused suite of deterministic workspace tools:
 
-| Route | Target | Purpose | Token Cost |
-| :--- | :--- | :--- | :--- |
-| **Route 1: Direct Tool / Code** | Deterministic functions (calculators, lookups, scripts) | Instant resolution of deterministic tasks without touching an LLM | **0 tokens** |
-| **Route 2: Local Model** | Fast local LLM | Conversational handling, simple Q&A, basic text summarization | **$0.00 / Zero API cost** |
-| **Route 3: Escalation Route** | Frontier model / Deep reasoning | Multi-step reasoning, complex code generation, or fallback when tools fail | **Targeted use only** |
+| Action Tool | Description | Why It Saves Tokens |
+| :--- | :--- | :--- |
+| `grep_code` | Searches codebase files for regex patterns, functions, or variable names. | Avoids passing entire project directories or file lists to a frontier model. |
+| `check_context` | Reads targeted line ranges or specific file slices. | Only reads the exact lines needed, preventing context-window bloat. |
+| `edit_file` | Applies surgical text or block replacements in existing files. | Performs mechanical code updates locally without full-file generation costs. |
+| `create_file` | Generates a new file with specified initial content. | Creates boilerplate, configurations, or new modules directly. |
+| `escalate` | Dispatches task to frontier LLM (e.g. Claude / GPT). | Reserved for multi-file architectural refactors or complex algorithmic generation. |
 
-### Adaptive Self-Redirection in Action
-1. The user asks: *"Calculate the quarterly projection from the remote sales sheet."*
-2. The router selects **Route 1 (Sales API Tool)**.
-3. The tool returns: `404: Endpoint unreachable / Missing authentication`.
-4. Instead of bubbling an error back to the user, the router **redirects itself**, analyzes the failure, and re-routes the task with contextual feedback to **Route 3 (Escalation / Frontier LLM)** to generate an alternative estimation approach.
-5. All intermediate reasoning hops and redirection events are emitted live to the dashboard and terminal.
+### How Self-Redirection Works in Practice
+1. **User Prompt:** *"Find where the user authentication token is verified and add expiration checking."*
+2. **Step 1 (Grep):** Small LLM decides: `grep_code { pattern: "verifyToken" }`.
+3. **Execution & Feedback:** Tool returns `0 matches found`.
+4. **Self-Redirection:** Instead of failing, the router intercepts the empty output. The small LLM re-evaluates:
+   * *Rationale:* *"Direct pattern verifyToken yielded 0 matches. Let's inspect auth middleware files."*
+   * *Action:* `grep_code { pattern: "auth" }` or `check_context { path: "src/middleware/auth.ts" }`.
+5. **Step 2 (Context Inspection):** Router reads lines 10–40 of `src/middleware/auth.ts`.
+6. **Step 3 (Edit):** Router dispatches `edit_file` to add the expiration check.
+7. **Total Tokens Burned on Frontier LLM:** **0 tokens** (all handled locally via the router and local tools).
 
 ---
 
 ## 📊 Real-Time React Dashboard
 
-The project includes a built-in local HTTP server and WebSocket broadcaster powering a live React dashboard:
+The embedded HTTP server and WebSocket broadcaster stream live analytics to a React dashboard:
 
-* **Live Decision Trace:** Visual step-by-step pipeline displaying incoming prompts, router rationale, chosen actions, and redirection hops.
-* **Cumulative Tokens Saved:** Estimated token counter comparing tokens used versus sending all requests directly to a frontier baseline model.
-* **Routing Latency:** Real-time millisecond latency tracking for classification and action execution.
-* **Route Distribution:** Interactive charts showing breakdown between deterministic tools, local LLM, and escalation routes.
+* **Live Decision Pipeline:** Step-by-step interactive timeline showing prompt ingress, local LLM rationale, tool dispatch (`grep`, `context`, `edit`), tool output, and redirection cycles.
+* **Token Savings Scoreboard:** Real-time calculator comparing local execution (0 API tokens) against what a frontier model would have consumed for the same prompt context and tool loops.
+* **Action Distribution Chart:** Pie/bar visualizer tracking frequencies of `grep_code`, `check_context`, `edit_file`, `create_file`, and `escalate`.
+* **Latency Telemetry:** Execution speed broken down by router decision time vs. tool execution time.
 
 ---
 
@@ -86,27 +105,31 @@ The project is structured as a strict npm workspaces monorepo:
 ```
 jev-router-ai/
 ├── packages/
-│   ├── router/          # Core routing logic, decision parser, self-redirection & Ollama integration
+│   ├── router/          # Core routing engine & local workspace tools
 │   │   ├── src/
-│   │   │   ├── engine.ts        # Ollama client & prompt formatting
-│   │   │   ├── parser.ts        # Hybrid JSON / regex fallback extraction
-│   │   │   ├── routes.ts        # Route definitions & tool registry
-│   │   │   ├── redirector.ts    # Self-redirection state machine
-│   │   │   └── types.ts         # Shared TypeScript interfaces
+│   │   │   ├── engine.ts         # Ollama client (smollm2:135m) & prompt templates
+│   │   │   ├── parser.ts         # Hybrid JSON & regex fallback parser
+│   │   │   ├── tools/            # Local workspace tools:
+│   │   │   │   ├── grep.ts       # Codebase regex & pattern search
+│   │   │   │   ├── context.ts    # File slice reader & line inspector
+│   │   │   │   ├── edit.ts       # Surgical file content replacer
+│   │   │   │   └── create.ts     # New file creator
+│   │   │   ├── redirector.ts     # Self-redirection state machine & feedback loop
+│   │   │   └── types.ts          # Tool interfaces, events, and action payloads
 │   │   └── package.json
 │   │
 │   ├── cli/             # Interactive terminal REPL & WebSocket telemetry server
 │   │   ├── src/
-│   │   │   ├── index.ts         # CLI entry point (interactive REPL)
-│   │   │   ├── server.ts        # HTTP & WebSocket server for dashboard
-│   │   │   └── ui.ts            # Terminal formatting & thought streaming
+│   │   │   ├── index.ts          # CLI REPL entry point
+│   │   │   ├── server.ts         # HTTP & WebSocket server for dashboard
+│   │   │   └── terminal.ts       # Live terminal thought & action formatter
 │   │   └── package.json
 │   │
 │   └── dashboard/       # Real-time React frontend (Vite + WebSockets)
 │       ├── src/
-│       │   ├── App.tsx          # Main dashboard view
-│       │   ├── components/      # Decision trace timeline, metrics cards, latency charts
-│       │   └── hooks/           # WebSocket real-time subscription
+│       │   ├── App.tsx           # Dashboard root
+│       │   ├── components/       # Decision trace, token savings counter, tool charts
+│       │   └── hooks/            # WebSocket subscription hook
 │       ├── index.html
 │       ├── vite.config.ts
 │       └── package.json
@@ -149,7 +172,7 @@ npm run build
 ## 💻 Usage
 
 ### Start Interactive CLI + Web Dashboard
-Run the combined development command:
+Run the combined development environment:
 
 ```bash
 npm run dev
@@ -165,15 +188,20 @@ This starts:
    ```
 2. **Real-time Web Dashboard** at `http://localhost:3000`.
 
-### Example CLI Interaction
+### Example CLI Session
 ```text
-> Enter prompt: What is 4829 * 192?
+> Enter prompt: Find where jwt is validated and check if secret is hardcoded
 
-[Router Thinking] Query requires exact arithmetic calculation. Deterministic tool preferred to save tokens.
-[Route Selected] Direct Tool: calculator {"expression": "4829 * 192"}
-[Execution] 927168
-[Result] 927,168
-[Stats] Latency: 42ms | Tokens Burned: 0 | Estimated Tokens Saved: 180
+[Router Thinking] User wants to inspect JWT validation. Initiating code search to locate relevant lines.
+[Action Dispatched] grep_code: { "pattern": "jwt.verify" }
+[Tool Output] Found 1 match in src/auth/jwt.ts:24
+
+[Self-Redirection] Need surrounding context around line 24 to check secret usage.
+[Action Dispatched] check_context: { "path": "src/auth/jwt.ts", "startLine": 15, "endLine": 35 }
+[Tool Output] Read 20 lines. Secret is passed via process.env.JWT_SECRET.
+
+[Router Result] The JWT verification is in src/auth/jwt.ts at line 24. The secret is securely read from process.env.JWT_SECRET and is not hardcoded.
+[Telemetry] Decision Hops: 2 | Latency: 84ms | Frontier Tokens Burned: 0 | Saved: ~1,450 tokens
 ```
 
 ---
@@ -181,23 +209,23 @@ This starts:
 ## 🗺️ Roadmap & Milestones
 
 - [x] **Milestone 1: Architectural Definition & Requirements**
-  - Clarify self-redirection mechanics and tri-route topology.
-  - Design npm workspaces monorepo structure.
-  - Document comprehensive system architecture.
-- [ ] **Milestone 2: Core Router Engine (`packages/router`)**
-  - Implement Ollama integration with `smollm2:135m`.
-  - Implement hybrid JSON parser with regex fallback.
-  - Implement adaptive self-redirection loop and error interceptor.
-  - Define built-in default tools and fallback routes.
+  - Define local workspace action toolset (`grep_code`, `check_context`, `edit_file`, `create_file`).
+  - Specify adaptive self-redirection feedback loop.
+  - Setup npm workspaces monorepo structure.
+- [ ] **Milestone 2: Core Router Engine & Tools (`packages/router`)**
+  - Implement Ollama client with `smollm2:135m`.
+  - Build local workspace tool implementations (`grep`, `context`, `edit`, `create`).
+  - Build hybrid JSON schema parser with regex fallback.
+  - Implement self-redirection state machine to handle empty results / tool errors.
 - [ ] **Milestone 3: Interactive CLI & Telemetry Server (`packages/cli`)**
-  - Build interactive terminal REPL with live thought streaming.
-  - Implement local HTTP server and WebSocket telemetry broadcaster.
+  - Interactive terminal REPL with live streaming of router reasoning and tool actions.
+  - Integrated HTTP & WebSocket server broadcasting telemetry events.
 - [ ] **Milestone 4: Real-Time React Dashboard (`packages/dashboard`)**
-  - Build Vite + React dashboard with WebSocket event listener.
-  - Implement live decision trace timeline, tokens saved counter, and latency metrics.
+  - Vite + React telemetry dashboard with live WebSocket listener.
+  - Real-time decision pipeline timeline, tokens saved counter, and tool distribution charts.
 - [ ] **Milestone 5: Production Target — Jev Integration**
-  - Integrate **Jev** (TypeSafe AI's System One decision model) as a production provider target.
-  - Benchmark sub-100ms deterministic routing and production-grade classification throughput.
+  - Swap local Ollama with TypeSafe AI's **Jev** System One decision model.
+  - Benchmark sub-100ms deterministic classification and production-scale workspace routing.
 
 ---
 
